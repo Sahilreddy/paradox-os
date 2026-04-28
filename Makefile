@@ -88,13 +88,25 @@ iso: $(KERNEL_BIN)
 	@grub-mkrescue -o $(ISO) $(ISO_DIR) 2>&1 | grep -v "xorriso"
 	@echo "Created ISO: $(ISO)"
 
+DISK := $(BUILD_DIR)/paradox-disk.img
+
+# A small (4 MiB) disk image with a recognizable header. Lets the ATA
+# driver actually find something to read; the contents are arbitrary.
+$(DISK):
+	@mkdir -p $(BUILD_DIR)
+	@dd if=/dev/zero of=$(DISK) bs=1M count=4 2>/dev/null
+	@printf 'ParadoxOS sample disk\nbuilt by Makefile\n' \
+	  | dd of=$(DISK) conv=notrunc 2>/dev/null
+
 # Run in QEMU
-run: iso
-	$(QEMU) -cdrom $(ISO) -m 512M -serial stdio
+run: iso $(DISK)
+	$(QEMU) -cdrom $(ISO) -drive file=$(DISK),format=raw,if=ide,index=0 \
+	        -m 512M -serial stdio
 
 # Debug in QEMU with GDB
-debug: iso
-	$(QEMU) -cdrom $(ISO) -m 512M -serial stdio -s -S
+debug: iso $(DISK)
+	$(QEMU) -cdrom $(ISO) -drive file=$(DISK),format=raw,if=ide,index=0 \
+	        -m 512M -serial stdio -s -S
 
 # Clean
 clean:

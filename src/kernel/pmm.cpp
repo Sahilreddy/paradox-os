@@ -169,6 +169,32 @@ void pmm_init(uint64_t mboot_addr) {
     serial_print("\nPMM: Initialized successfully!\n");
 }
 
+// Allocate N physically contiguous pages. Returns the address of the first
+// page, or nullptr if no run of N free pages exists. The bitmap is scanned
+// linearly and the first run wide enough wins.
+void* pmm_alloc_contiguous(uint64_t n_pages) {
+    if (n_pages == 0) return nullptr;
+    uint64_t run = 0;
+    uint64_t run_start = 0;
+    for (uint64_t i = 1; i < total_pages; i++) {
+        if (!bitmap_test(i)) {
+            if (run == 0) run_start = i;
+            run++;
+            if (run >= n_pages) {
+                for (uint64_t j = run_start; j < run_start + n_pages; j++) {
+                    bitmap_set(j);
+                    used_pages++;
+                }
+                return (void*)(run_start * PAGE_SIZE);
+            }
+        } else {
+            run = 0;
+        }
+    }
+    serial_print("PMM: ERROR - no contiguous run available\n");
+    return nullptr;
+}
+
 // Allocate a physical page
 void* pmm_alloc_page() {
     // Start from page 1 (skip page 0 to avoid confusing NULL pointers)

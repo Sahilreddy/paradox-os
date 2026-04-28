@@ -7,7 +7,6 @@
 #include "../include/timer.h"
 #include "../include/syscall.h"
 #include "../include/pci.h"
-#include "../include/pci.h"
 
 // Shell state
 static char command_buffer[SHELL_MAX_COMMAND_LENGTH];
@@ -352,8 +351,8 @@ void shell_execute(const char* command) {
     } else if (strncmp(command, "spawn", cmd_len) == 0 && cmd_len == 5) {
         cmd_spawn();
     } else if (strncmp(command, "syscall", cmd_len) == 0 && cmd_len == 7) {
-        cmd_syscall();    } else if (strncmp(command, "lspci", cmd_len) == 0 && cmd_len == 5) {
-        cmd_lspci();    } else if (strncmp(command, "lspci", cmd_len) == 0 && cmd_len == 5) {
+        cmd_syscall();
+    } else if (strncmp(command, "lspci", cmd_len) == 0 && cmd_len == 5) {
         cmd_lspci();
     } else if (strncmp(command, "reboot", cmd_len) == 0 && cmd_len == 6) {
         cmd_reboot();

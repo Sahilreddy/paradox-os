@@ -5,6 +5,7 @@
 #include "../include/keyboard.h"
 #include "../include/timer.h"
 #include "../include/syscall.h"
+#include "../include/mouse.h"
 
 // IDT with 256 entries (0-255)
 #define IDT_ENTRIES 256
@@ -207,6 +208,9 @@ extern "C" void irq_handler(uint64_t irq_num) {
             keyboard_handler();
             break;
         case 34:  // IRQ2 - Cascade (never raised)
+            break;
+        case 44:  // IRQ12 - PS/2 Mouse
+            mouse_handler();
             break;
         default:
             // Unknown IRQ
