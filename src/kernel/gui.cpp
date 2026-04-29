@@ -27,6 +27,7 @@
 #include "../include/memory.h"
 #include "../include/pci.h"
 #include "../include/ata.h"
+#include "../include/process.h"
 
 // ----- Theme ----------------------------------------------------------------
 static const fb_color C_DESKTOP    = FB_RGB(0x0a, 0x0e, 0x1c);
@@ -320,8 +321,26 @@ static void draw_starfield() {
     }
 }
 
+// Taskbar layout — public-ish so click handling can use the same numbers.
+#define TASKBAR_H            32
+#define TASKBAR_BTN_W        140
+#define TASKBAR_BTN_H        24
+#define TASKBAR_BTN_GAP      6
+#define TASKBAR_BTN_LEFT     110   // leaves room for the brand on the left
+
+// Returns the on-screen rect of the taskbar button for the i'th open window
+// in z-order. Returns false if there is no such button.
+static bool taskbar_btn_rect(int z_idx,
+                             int32_t* x, int32_t* y,
+                             int32_t* w, int32_t* h) {
+    if (z_idx < 0 || z_idx >= z_count) return false;
+    int32_t base_x = TASKBAR_BTN_LEFT + z_idx * (TASKBAR_BTN_W + TASKBAR_BTN_GAP);
+    int32_t base_y = (int32_t)fb_height() - TASKBAR_H + (TASKBAR_H - TASKBAR_BTN_H) / 2;
+    *x = base_x; *y = base_y; *w = TASKBAR_BTN_W; *h = TASKBAR_BTN_H;
+    return true;
+}
+
 static void draw_desktop_bg() {
-    // Vertical-gradient-ish background by alternating two close colors.
     uint32_t H = fb_height();
     for (uint32_t y = 0; y < H; y++) {
         fb_color c = (y / 4) & 1 ? C_DESKTOP : C_DESKTOP_2;
@@ -329,12 +348,29 @@ static void draw_desktop_bg() {
     }
     draw_starfield();
 
-    // Taskbar
-    int32_t bar_h = 32;
+    // Taskbar background.
+    int32_t bar_h = TASKBAR_H;
     fb_fill_rect(0, fb_height() - bar_h, fb_width(), bar_h, C_TASKBAR);
     fb_fill_rect(0, fb_height() - bar_h, fb_width(), 1, C_TASKBAR_HI);
     font_draw_string(10, fb_height() - bar_h + (bar_h - FONT_HEIGHT) / 2,
                      "ParadoxOS", C_TASKBAR_HI, 0, false);
+
+    // Buttons for each open window, focused one highlighted.
+    int focused = z_count > 0 ? z_order[z_count - 1] : -1;
+    for (int i = 0; i < z_count; i++) {
+        int32_t bx, by, bw, bh;
+        if (!taskbar_btn_rect(i, &bx, &by, &bw, &bh)) break;
+        int idx = z_order[i];
+        bool is_focused = (idx == focused);
+        fb_color bg = is_focused ? C_WIN_TITLE_F : C_WIN_TITLE;
+        fb_fill_rect(bx, by, bw, bh, bg);
+        fb_rect_outline(bx, by, bw, bh, C_WIN_BORDER);
+        // Truncate title to fit.
+        const char* t = windows[idx].title;
+        int max_chars = (bw - 12) / FONT_WIDTH;
+        font_draw_n(bx + 6, by + (bh - FONT_HEIGHT) / 2, t,
+                    (uint32_t)max_chars, C_TEXT, 0, false);
+    }
 
     // Right side: tick-based clock.
     char buf[32];
@@ -535,7 +571,7 @@ static void draw_monitor_in(const window_t& w) {
     by += row_h + 8;
 
     // Memory bar
-    uint64_t total_mb = pmm_get_total_memory() / (1024 * 1024);
+    uint64_t total_mb = pmm_get_managed_memory() / (1024 * 1024);
     uint64_t used_mb  = pmm_get_used_memory()  / (1024 * 1024);
     uint64_t free_mb  = pmm_get_free_memory()  / (1024 * 1024);
     n = 0;
@@ -612,7 +648,7 @@ static void draw_files_in(const window_t& w) {
     font_draw_string(bx, by, "memory/", C_TEXT, 0, false); by += row_h;
     n = 0;
     n = cat(buf, sizeof(buf), n, "  total : ");
-    n += fmt_u64(buf + n, sizeof(buf) - n, pmm_get_total_memory() / (1024 * 1024));
+    n += fmt_u64(buf + n, sizeof(buf) - n, pmm_get_managed_memory() / (1024 * 1024));
     n = cat(buf, sizeof(buf), n, " MiB,  used: ");
     n += fmt_u64(buf + n, sizeof(buf) - n, pmm_get_used_memory() / (1024 * 1024));
     n = cat(buf, sizeof(buf), n, " MiB,  free: ");
@@ -637,32 +673,66 @@ static void draw_files_in(const window_t& w) {
     font_draw_string(bx, by, buf, C_TEXT_DIM, 0, false);
     by += row_h + 4;
 
-    // Hex dump of the first 64 bytes of LBA 0.
+    // Hex + ASCII dump of the first 64 bytes of LBA 0.
     if (g_boot_sector_valid) {
         font_draw_string(bx, by, "  LBA 0 (first 64 bytes):", C_TEXT_DIM, 0, false);
         by += row_h;
+        char hex[64], ascii[20];
+        static const char* H = "0123456789ABCDEF";
         for (int line = 0; line < 4; line++) {
+            // Hex part: 16 bytes "AB CD EF ..."
+            uint32_t hn = 0;
+            for (int i = 0; i < 16; i++) {
+                uint8_t b = g_boot_sector[line * 16 + i];
+                hex[hn++] = H[(b >> 4) & 0xF];
+                hex[hn++] = H[b & 0xF];
+                hex[hn++] = ' ';
+            }
+            hex[hn] = 0;
+            // ASCII part: printable or '.'
+            for (int i = 0; i < 16; i++) {
+                uint8_t b = g_boot_sector[line * 16 + i];
+                ascii[i] = (b >= 32 && b < 127) ? (char)b : '.';
+            }
+            ascii[16] = 0;
+
+            // Compose: "    OFFS  HEX  |ASCII|"
             n = 0;
             n = cat(buf, sizeof(buf), n, "    ");
-            n += fmt_hex(buf + n, sizeof(buf) - n, line * 16, 4);
+            uint32_t off = (uint32_t)(line * 16);
+            if (n + 6 < sizeof(buf)) {
+                buf[n++] = H[(off >> 12) & 0xF];
+                buf[n++] = H[(off >>  8) & 0xF];
+                buf[n++] = H[(off >>  4) & 0xF];
+                buf[n++] = H[(off >>  0) & 0xF];
+            }
             n = cat(buf, sizeof(buf), n, "  ");
-            for (int i = 0; i < 16; i++) {
-                n += fmt_hex(buf + n, sizeof(buf) - n,
-                             g_boot_sector[line * 16 + i], 2);
-                buf[n++] = ' ';
-                if (n + 1 >= sizeof(buf)) break;
-            }
-            buf[n] = 0;
-            // Strip the "0x" prefixes that fmt_hex adds for compact display.
-            // Easier: just write out a custom one. Quick post-process:
-            char compact[160]; uint32_t cn = 0;
-            for (uint32_t i = 0; i < n; i++) {
-                if (buf[i] == '0' && i + 1 < n && buf[i + 1] == 'x') { i++; continue; }
-                compact[cn++] = buf[i];
-            }
-            compact[cn] = 0;
-            font_draw_string(bx, by, compact, C_TEXT_DIM, 0, false);
+            n = cat(buf, sizeof(buf), n, hex);
+            n = cat(buf, sizeof(buf), n, " |");
+            n = cat(buf, sizeof(buf), n, ascii);
+            n = cat(buf, sizeof(buf), n, "|");
+            font_draw_string(bx, by, buf, C_TEXT_DIM, 0, false);
             by += row_h;
+        }
+    }
+    by += 6;
+
+    // proc/ — currently the kernel only runs a single idle process plus
+    // the scheduler bookkeeping. Once Track B brings real ELF userspace,
+    // this list expands into a real process table.
+    font_draw_string(bx, by, "proc/", C_TEXT, 0, false); by += row_h;
+    {
+        process* cur = process_get_current();
+        n = 0;
+        n = cat(buf, sizeof(buf), n, "  PID  STATE      NAME");
+        font_draw_string(bx, by, buf, C_TEXT_DIM, 0, false); by += row_h;
+        if (cur) {
+            n = 0;
+            n = cat(buf, sizeof(buf), n, "  ");
+            n += fmt_u64(buf + n, sizeof(buf) - n, cur->pid);
+            n = cat(buf, sizeof(buf), n, "    RUNNING    ");
+            n = cat(buf, sizeof(buf), n, cur->name);
+            font_draw_string(bx, by, buf, C_TEXT_DIM, 0, false); by += row_h;
         }
     }
     by += 6;
@@ -731,6 +801,23 @@ static void redraw_all() {
 
 // ----- Click + drag dispatch ------------------------------------------------
 static bool handle_left_press(int32_t cx, int32_t cy) {
+    // Taskbar buttons first — clicking one focuses (and brings to top) the
+    // matching window. Lets you raise a window that's fully covered by
+    // another, which is otherwise impossible with no Alt+Tab.
+    int32_t taskbar_top = (int32_t)fb_height() - TASKBAR_H;
+    if (cy >= taskbar_top) {
+        for (int i = 0; i < z_count; i++) {
+            int32_t bx, by, bw, bh;
+            if (!taskbar_btn_rect(i, &bx, &by, &bw, &bh)) break;
+            if (point_in(cx, cy, bx, by, bw, bh)) {
+                z_bring_to_top(z_order[i]);
+                return true;
+            }
+        }
+        // Click on empty taskbar area: nothing.
+        return false;
+    }
+
     // Walk windows top-down.
     for (int i = z_count - 1; i >= 0; i--) {
         int idx = z_order[i];
@@ -742,7 +829,6 @@ static bool handle_left_press(int32_t cx, int32_t cy) {
         }
         z_bring_to_top(idx);
         if (point_in_titlebar(w, cx, cy)) {
-            // Begin drag.
             g_drag_idx = idx;
             g_drag_off_x = w.x - cx;
             g_drag_off_y = w.y - cy;
@@ -847,29 +933,29 @@ void gui_tick() {
 
     bool need = term.dirty;
 
-    // --- Drag ---
-    if (g_drag_idx >= 0) {
-        // Update window position whenever the cursor has moved.
-        if (windows[g_drag_idx].used) {
-            int32_t nx = ev.x + g_drag_off_x;
-            int32_t ny = ev.y + g_drag_off_y;
-            // Keep at least the close-button row visible.
-            int32_t W = (int32_t)fb_width();
-            int32_t H = (int32_t)fb_height();
-            if (nx < -windows[g_drag_idx].w + 80) nx = -windows[g_drag_idx].w + 80;
-            if (nx > W - 80)            nx = W - 80;
-            if (ny < 0)                 ny = 0;
-            if (ny > H - TITLE_H - 32)  ny = H - TITLE_H - 32;
-            if (windows[g_drag_idx].x != nx || windows[g_drag_idx].y != ny) {
-                windows[g_drag_idx].x = nx;
-                windows[g_drag_idx].y = ny;
-                need = true;
-            }
-        }
-        if (ev.released & MOUSE_BUTTON_LEFT) g_drag_idx = -1;
-    } else if (ev.pressed & MOUSE_BUTTON_LEFT) {
+    // --- Click + drag ---
+    // Process press first (may start a drag), then update drag position,
+    // then process release. Doing release last means a press+release that
+    // both arrived in the same tick still ends the drag cleanly.
+    if ((ev.pressed & MOUSE_BUTTON_LEFT) && g_drag_idx < 0) {
         if (handle_left_press(ev.x, ev.y)) need = true;
     }
+    if (g_drag_idx >= 0 && windows[g_drag_idx].used) {
+        int32_t nx = ev.x + g_drag_off_x;
+        int32_t ny = ev.y + g_drag_off_y;
+        int32_t W = (int32_t)fb_width();
+        int32_t H = (int32_t)fb_height();
+        if (nx < -windows[g_drag_idx].w + 80) nx = -windows[g_drag_idx].w + 80;
+        if (nx > W - 80)            nx = W - 80;
+        if (ny < 0)                 ny = 0;
+        if (ny > H - TITLE_H - 32)  ny = H - TITLE_H - 32;
+        if (windows[g_drag_idx].x != nx || windows[g_drag_idx].y != ny) {
+            windows[g_drag_idx].x = nx;
+            windows[g_drag_idx].y = ny;
+            need = true;
+        }
+    }
+    if (ev.released & MOUSE_BUTTON_LEFT) g_drag_idx = -1;
 
     // Cursor motion always redraws so the arrow follows.
     static int32_t last_x = -1, last_y = -1;

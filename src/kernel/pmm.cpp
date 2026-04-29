@@ -238,6 +238,10 @@ uint64_t pmm_get_total_memory() {
     return total_memory;
 }
 
+uint64_t pmm_get_managed_memory() {
+    return total_pages * PAGE_SIZE;
+}
+
 uint64_t pmm_get_used_memory() {
     return used_pages * PAGE_SIZE;
 }
