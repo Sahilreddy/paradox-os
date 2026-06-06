@@ -23,7 +23,8 @@ struct gdt_pointer {
 #define GDT_ACCESS_PRESENT      0x80    // Present bit
 #define GDT_ACCESS_PRIV_RING0   0x00    // Ring 0 (kernel)
 #define GDT_ACCESS_PRIV_RING3   0x60    // Ring 3 (user)
-#define GDT_ACCESS_EXECUTABLE   0x08    // Code segment
+#define GDT_ACCESS_NONSYS       0x10    // S bit: non-system (code or data)
+#define GDT_ACCESS_EXECUTABLE   0x08    // Code segment (vs data)
 #define GDT_ACCESS_RW           0x02    // Readable (code) / Writable (data)
 #define GDT_ACCESS_ACCESSED     0x01    // Accessed bit
 

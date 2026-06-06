@@ -5,6 +5,9 @@
 #include "../include/keyboard.h"
 #include "../include/timer.h"
 #include "../include/syscall.h"
+#include "../include/mouse.h"
+
+extern "C" void syscall_handler_asm();
 
 // IDT with 256 entries (0-255)
 #define IDT_ENTRIES 256
@@ -76,7 +79,10 @@ void idt_init() {
     idt_set_gate(45, (uint64_t)irq13, 0x08, IDT_TYPE_INTERRUPT);
     idt_set_gate(46, (uint64_t)irq14, 0x08, IDT_TYPE_INTERRUPT);
     idt_set_gate(47, (uint64_t)irq15, 0x08, IDT_TYPE_INTERRUPT);
-    
+
+    // System-call vector: int 0x80, callable from ring 3.
+    idt_set_gate(0x80, (uint64_t)syscall_handler_asm, 0x08, IDT_TYPE_USER);
+
     // Load the IDT
     idt_flush((uint64_t)&idt_ptr);
     
@@ -207,6 +213,9 @@ extern "C" void irq_handler(uint64_t irq_num) {
             keyboard_handler();
             break;
         case 34:  // IRQ2 - Cascade (never raised)
+            break;
+        case 44:  // IRQ12 - PS/2 Mouse
+            mouse_handler();
             break;
         default:
             // Unknown IRQ

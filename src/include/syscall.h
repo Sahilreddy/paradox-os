@@ -21,6 +21,7 @@ struct cpu_context;
 #define SYS_GETPID  7
 #define SYS_SLEEP   8
 #define SYS_YIELD   9
+#define SYS_HELLO   10  // demo: prints a fixed banner from kernel mode
 
 // Initialize system calls
 void syscall_init();
@@ -32,6 +33,7 @@ int64_t sys_exit(int status);
 int64_t sys_getpid();
 int64_t sys_sleep(uint32_t milliseconds);
 int64_t sys_yield();
+int64_t sys_hello();
 
 // Invoke a system call from kernel mode (for testing)
 int64_t syscall_invoke(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uint64_t arg3);

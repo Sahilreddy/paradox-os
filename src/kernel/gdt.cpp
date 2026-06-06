@@ -28,30 +28,30 @@ void gdt_init() {
     // Null descriptor (required)
     gdt_set_gate(0, 0, 0, 0, 0);
     
-    // Kernel code segment (ring 0)
-    // Base = 0, Limit = 0xFFFFF (full 4GB with granularity)
-    // Access: Present | Ring 0 | Executable | Readable
-    // Gran: 64-bit | 4KB pages
-    gdt_set_gate(1, 0, 0xFFFFFFFF, 
-                 GDT_ACCESS_PRESENT | GDT_ACCESS_PRIV_RING0 | GDT_ACCESS_EXECUTABLE | GDT_ACCESS_RW,
+    // Kernel code segment (ring 0). All four "real" segment descriptors
+    // have S=1 (non-system / code-or-data), without which retfq into
+    // them triple-faults (CPU treats the descriptor as a system entry).
+    gdt_set_gate(1, 0, 0xFFFFFFFF,
+                 GDT_ACCESS_PRESENT | GDT_ACCESS_PRIV_RING0 |
+                 GDT_ACCESS_NONSYS | GDT_ACCESS_EXECUTABLE | GDT_ACCESS_RW,
                  GDT_GRAN_64BIT | GDT_GRAN_4K);
-    
+
     // Kernel data segment (ring 0)
-    // Base = 0, Limit = 0xFFFFF
-    // Access: Present | Ring 0 | Writable
-    // Gran: 64-bit | 4KB pages
     gdt_set_gate(2, 0, 0xFFFFFFFF,
-                 GDT_ACCESS_PRESENT | GDT_ACCESS_PRIV_RING0 | GDT_ACCESS_RW,
+                 GDT_ACCESS_PRESENT | GDT_ACCESS_PRIV_RING0 |
+                 GDT_ACCESS_NONSYS | GDT_ACCESS_RW,
                  GDT_GRAN_64BIT | GDT_GRAN_4K);
-    
-    // User code segment (ring 3) - for future use
+
+    // User code segment (ring 3)
     gdt_set_gate(3, 0, 0xFFFFFFFF,
-                 GDT_ACCESS_PRESENT | GDT_ACCESS_PRIV_RING3 | GDT_ACCESS_EXECUTABLE | GDT_ACCESS_RW,
+                 GDT_ACCESS_PRESENT | GDT_ACCESS_PRIV_RING3 |
+                 GDT_ACCESS_NONSYS | GDT_ACCESS_EXECUTABLE | GDT_ACCESS_RW,
                  GDT_GRAN_64BIT | GDT_GRAN_4K);
-    
-    // User data segment (ring 3) - for future use
+
+    // User data segment (ring 3)
     gdt_set_gate(4, 0, 0xFFFFFFFF,
-                 GDT_ACCESS_PRESENT | GDT_ACCESS_PRIV_RING3 | GDT_ACCESS_RW,
+                 GDT_ACCESS_PRESENT | GDT_ACCESS_PRIV_RING3 |
+                 GDT_ACCESS_NONSYS | GDT_ACCESS_RW,
                  GDT_GRAN_64BIT | GDT_GRAN_4K);
     
     // TSS segment (takes 2 entries in x86_64)

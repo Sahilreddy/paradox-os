@@ -7,7 +7,7 @@ echo "========================================"
 echo "  Building ParadoxOS..."
 echo "========================================"
 make clean > /dev/null 2>&1
-make iso 2>&1 | grep -E "(Built|Created)"
+make iso build/paradox-disk.img 2>&1 | grep -E "(Built|Created)"
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -28,6 +28,7 @@ if [ $? -eq 0 ]; then
     
     qemu-system-x86_64 \
         -cdrom build/paradoxos.iso \
+        -drive file=build/paradox-disk.img,format=raw,if=ide,index=0 \
         -m 512M \
         -serial stdio \
         -vga std \

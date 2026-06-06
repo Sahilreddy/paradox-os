@@ -11,36 +11,40 @@ struct heap_block {
 
 static heap_block* heap_start = nullptr;
 static uint64_t heap_size = 0;
-static const uint64_t INITIAL_HEAP_PAGES = 256; // 1MB initial heap
+// 16 MiB. Big enough for a 1024x768x32 back buffer (~3 MiB) plus window
+// state, with headroom. Bump again if we add bigger off-screen surfaces.
+static const uint64_t INITIAL_HEAP_PAGES = 4096;
 
-// Initialize kernel heap
+// Initialize kernel heap.
+//
+// We need a flat run of physical pages so that pointer arithmetic across
+// the whole heap is valid. Earlier this code called pmm_alloc_page() in a
+// loop, but PMM skips reserved regions (BIOS/VGA holes around 0xA0000),
+// so the run was not actually contiguous and the resulting heap silently
+// indexed into ROM memory once it grew beyond ~640 KiB. Use the proper
+// contiguous allocator and trust it.
 void heap_init() {
     serial_print("Heap: Initializing kernel heap...\n");
-    
-    // Allocate first page for heap
-    void* first_page = pmm_alloc_page();
-    if (!first_page) {
-        serial_print("Heap: ERROR - Failed to allocate first page!\n");
-        return;
-    }
-    
-    // With identity mapping, physical address == virtual address
-    heap_start = (heap_block*)first_page;
-    heap_size = PAGE_SIZE;
-    
-    // Allocate additional pages
-    for (uint64_t i = 1; i < INITIAL_HEAP_PAGES; i++) {
-        void* page = pmm_alloc_page();
-        if (!page) {
-            serial_print("Heap: Allocated ");
-            serial_print_hex((uint32_t)i);
-            serial_print(" pages total\n");
-            heap_size = i * PAGE_SIZE;
-            break;
+
+    void* base = pmm_alloc_contiguous(INITIAL_HEAP_PAGES);
+    if (!base) {
+        // Fall back: maybe we asked for too much. Halve repeatedly until
+        // something fits, so the heap is always *some* valid size.
+        for (uint64_t n = INITIAL_HEAP_PAGES / 2; n >= 16; n /= 2) {
+            base = pmm_alloc_contiguous(n);
+            if (base) {
+                heap_size = n * PAGE_SIZE;
+                break;
+            }
         }
-        // Pages are contiguous in physical memory due to how PMM allocates
-        heap_size += PAGE_SIZE;
+        if (!base) {
+            serial_print("Heap: ERROR - no contiguous run available\n");
+            return;
+        }
+    } else {
+        heap_size = INITIAL_HEAP_PAGES * PAGE_SIZE;
     }
+    heap_start = (heap_block*)base;
     
     // Initialize first block
     heap_start->size = heap_size - sizeof(heap_block);

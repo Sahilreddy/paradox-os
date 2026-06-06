@@ -21,12 +21,6 @@ static void io_wait() {
 // By default, IRQ0-7 are mapped to INT 0x08-0x0F (conflicts with CPU exceptions)
 // We remap to INT 0x20-0x2F (32-47)
 void pic_init() {
-    uint8_t mask1, mask2;
-    
-    // Save current masks
-    mask1 = inb(PIC1_DATA);
-    mask2 = inb(PIC2_DATA);
-    
     // Start initialization sequence (ICW1)
     outb(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4);
     io_wait();

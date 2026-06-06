@@ -38,7 +38,11 @@ KERNEL_C_OBJ := $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/kernel/%.o,$(KERNEL_C)
 KERNEL_CPP_OBJ := $(patsubst $(KERNEL_DIR)/%.cpp,$(BUILD_DIR)/kernel/%.o,$(KERNEL_CPP))
 KERNEL_ASM_OBJ := $(patsubst $(KERNEL_DIR)/%.asm,$(BUILD_DIR)/kernel/%.o,$(KERNEL_ASM))
 
-ALL_OBJ := $(BOOT_OBJ) $(KERNEL_C_OBJ) $(KERNEL_CPP_OBJ) $(KERNEL_ASM_OBJ)
+USER_PROGRAMS := hello echo cat
+USER_ELF_OBJS := $(addprefix $(BUILD_DIR)/user_,$(addsuffix .elf.o,$(USER_PROGRAMS)))
+
+ALL_OBJ := $(BOOT_OBJ) $(KERNEL_C_OBJ) $(KERNEL_CPP_OBJ) $(KERNEL_ASM_OBJ) \
+           $(USER_ELF_OBJS)
 
 # Targets
 KERNEL_BIN := $(BUILD_DIR)/paradoxos.bin
@@ -88,13 +92,62 @@ iso: $(KERNEL_BIN)
 	@grub-mkrescue -o $(ISO) $(ISO_DIR) 2>&1 | grep -v "xorriso"
 	@echo "Created ISO: $(ISO)"
 
+# ----- Userland ELF -------------------------------------------------------
+# Compile each user/<name>.c into its own ELF, link it with the shared
+# crt0.asm (which sets up argc/argv from the user stack), then convert
+# the linked ELF into a binary blob the kernel can embed. The kernel
+# references the blobs via the objcopy-injected symbols
+# `_binary_build_user_<name>_elf_start/_end`.
+USER_DIR     := user
+USER_LD      := $(USER_DIR)/user.ld
+USER_CRT_SRC := $(USER_DIR)/crt0.asm
+USER_CRT_OBJ := $(BUILD_DIR)/user_crt0.o
+
+USER_CFLAGS  := -ffreestanding -nostdlib -fno-pic -mno-red-zone \
+                -fno-stack-protector -Wall -O1
+USER_LDFLAGS := -nostdlib -static -T $(USER_LD)
+
+$(USER_CRT_OBJ): $(USER_CRT_SRC)
+	@mkdir -p $(BUILD_DIR)
+	$(ASM) $(ASMFLAGS) $< -o $@
+
+# Template: build $(BUILD_DIR)/user_NAME.elf from user/NAME.c + crt0,
+# then objcopy it into $(BUILD_DIR)/user_NAME.elf.o.
+define USER_PROG_RULE
+$$(BUILD_DIR)/user_$(1).o: $$(USER_DIR)/$(1).c $$(USER_DIR)/syscall.h
+	@mkdir -p $$(BUILD_DIR)
+	$$(CC) $$(USER_CFLAGS) -c $$< -o $$@
+
+$$(BUILD_DIR)/user_$(1).elf: $$(BUILD_DIR)/user_$(1).o $$(USER_CRT_OBJ) $$(USER_LD)
+	$$(LD) $$(USER_LDFLAGS) -o $$@ $$(USER_CRT_OBJ) $$(BUILD_DIR)/user_$(1).o
+
+$$(BUILD_DIR)/user_$(1).elf.o: $$(BUILD_DIR)/user_$(1).elf
+	objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+	    --rename-section .data=.user_blob,alloc,load,readonly,data,contents \
+	    $$< $$@
+endef
+
+$(foreach prog,$(USER_PROGRAMS),$(eval $(call USER_PROG_RULE,$(prog))))
+
+DISK := $(BUILD_DIR)/paradox-disk.img
+
+# A small (4 MiB) disk image with a recognizable header. Lets the ATA
+# driver actually find something to read; the contents are arbitrary.
+$(DISK):
+	@mkdir -p $(BUILD_DIR)
+	@dd if=/dev/zero of=$(DISK) bs=1M count=4 2>/dev/null
+	@printf 'ParadoxOS sample disk\nbuilt by Makefile\n' \
+	  | dd of=$(DISK) conv=notrunc 2>/dev/null
+
 # Run in QEMU
-run: iso
-	$(QEMU) -cdrom $(ISO) -m 512M -serial stdio
+run: iso $(DISK)
+	$(QEMU) -cdrom $(ISO) -drive file=$(DISK),format=raw,if=ide,index=0 \
+	        -m 512M -serial stdio
 
 # Debug in QEMU with GDB
-debug: iso
-	$(QEMU) -cdrom $(ISO) -m 512M -serial stdio -s -S
+debug: iso $(DISK)
+	$(QEMU) -cdrom $(ISO) -drive file=$(DISK),format=raw,if=ide,index=0 \
+	        -m 512M -serial stdio -s -S
 
 # Clean
 clean:

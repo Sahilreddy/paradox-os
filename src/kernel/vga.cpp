@@ -1,11 +1,21 @@
 // ParadoxOS VGA Text Mode Driver
+//
+// When the GUI compositor is initialized, `vga_set_gui_redirect(true)`
+// flips `g_redirect_to_gui` and from then on every char written via
+// `vga_putchar` / `vga_print` is forwarded to the GUI terminal. The VGA
+// path stays available for early-boot diagnostics and the no-framebuffer
+// fallback.
 
 #include "../include/vga.h"
+#include "../include/gui.h"
 
 static uint16_t* vga_buffer = (uint16_t*)0xB8000;
 static uint32_t vga_row = 0;
 static uint32_t vga_col = 0;
 static uint8_t vga_color = VGA_COLOR_WHITE | (VGA_COLOR_BLACK << 4);
+static bool g_redirect_to_gui = false;
+
+void vga_set_gui_redirect(bool on) { g_redirect_to_gui = on; }
 
 void vga_init() {
     vga_row = 0;
@@ -30,6 +40,10 @@ void vga_setcolor(uint8_t fg, uint8_t bg) {
 }
 
 void vga_putchar(char c) {
+    if (g_redirect_to_gui) {
+        gui_term_putc(c);
+        return;
+    }
     if (c == '\n') {
         vga_col = 0;
         vga_row++;
@@ -58,6 +72,10 @@ void vga_putchar(char c) {
 }
 
 void vga_print(const char* str) {
+    if (g_redirect_to_gui) {
+        gui_term_puts(str);
+        return;
+    }
     for (uint32_t i = 0; str[i] != '\0'; i++) {
         vga_putchar(str[i]);
     }

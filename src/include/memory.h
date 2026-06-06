@@ -38,8 +38,18 @@ struct multiboot2_tag_mmap {
 // Physical Memory Manager
 void pmm_init(uint64_t mboot_addr);
 void* pmm_alloc_page();
+// Allocate `n` *physically contiguous* pages. Returns nullptr if no run of
+// that size is free. Use this for buffers that must be flat in physical
+// memory (framebuffer back buffers, DMA buffers, etc.).
+void* pmm_alloc_contiguous(uint64_t n_pages);
 void pmm_free_page(void* page);
+// Bytes in the PMM's bitmap region. This is the *address space* the
+// allocator covers, which on x86 includes ROM/MMIO holes and reads as a
+// nonsensically large number — useful for debug only, not for display.
 uint64_t pmm_get_total_memory();
+// RAM the PMM is actually tracking (used + free pages). This is what
+// users mean by "total RAM" — display this in UI.
+uint64_t pmm_get_managed_memory();
 uint64_t pmm_get_used_memory();
 uint64_t pmm_get_free_memory();
 

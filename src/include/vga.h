@@ -43,4 +43,9 @@ void vga_print_dec(uint64_t value);
 void vga_print_hex_byte(uint8_t num);
 void vga_print_hex_word(uint16_t num);
 
+// Once the GUI compositor is up, all `vga_*` text output is forwarded into
+// the GUI terminal. This lets existing shell/diagnostic code (which writes
+// via vga_print) keep working unmodified after we go graphical.
+void vga_set_gui_redirect(bool on);
+
 #endif // VGA_H
